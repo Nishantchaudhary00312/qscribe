@@ -3,8 +3,10 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
-
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'notes.dart';
 class McqGeneratorFormPage extends StatefulWidget {
   const McqGeneratorFormPage({super.key});
 
@@ -16,8 +18,8 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
   File? _pdfFile;
   String _difficulty = 'Easy';
   int _numQuestions = 1;
+  List<dynamic> _mcqs = [];  // To store generated MCQs
 
-  // Form Fields
   final TextEditingController _examNameController = TextEditingController();
   final TextEditingController _subjectNameController = TextEditingController();
   final TextEditingController _studentNameController = TextEditingController();
@@ -25,7 +27,6 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
   final TextEditingController _timeController = TextEditingController();
   final TextEditingController _marksController = TextEditingController();
 
-  // ✅ Pick PDF
   Future<void> _pickPdf() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -39,7 +40,35 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
     }
   }
 
-  // ✅ Submit Form and Send PDF to Flask
+  Future<void> _pickDate() async {
+    DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        _dateController.text = "${pickedDate.day}/${pickedDate.month}/${pickedDate.year}";
+      });
+    }
+  }
+
+  // ✅ Function to Pick Time
+  Future<void> _pickTime() async {
+    TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+
+    if (pickedTime != null) {
+      setState(() {
+        _timeController.text = pickedTime.format(context);
+      });
+    }
+  }
+
   Future<void> _submitForm() async {
     if (_pdfFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -48,13 +77,10 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
       return;
     }
 
-    var uri = Uri.parse('http://192.168.171.218:5000/generate-mcqs');  // Replace with your Flask server IP
+    var uri = Uri.parse('http://192.168.171.216:5000/generate-mcqs');  // Replace with your Flask server IP
     var request = http.MultipartRequest('POST', uri);
 
-    // Add PDF file
     request.files.add(await http.MultipartFile.fromPath('pdf', _pdfFile!.path));
-
-    // Add form data
     request.fields['exam_name'] = _examNameController.text;
     request.fields['subject'] = _subjectNameController.text;
     request.fields['student_name'] = _studentNameController.text;
@@ -64,30 +90,101 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
     request.fields['difficulty'] = _difficulty;
     request.fields['numMCQs'] = _numQuestions.toString();
 
-    // ✅ Send request
     var response = await request.send();
 
     if (response.statusCode == 200) {
       var responseBody = await response.stream.bytesToString();
       var jsonResponse = jsonDecode(responseBody);
 
-      List<dynamic> mcqs = jsonResponse['mcqs'];
-      List<dynamic> answerKey = jsonResponse['answer_key'];
-
-      // Navigate to MCQ Display Page
-      if (context.mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => McqDisplayPage(jsonResponse: jsonResponse),
-          ),
-        );
-      }
+      setState(() {
+        _mcqs = jsonResponse['mcqs'] ?? [];
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to generate MCQs. Status: ${response.statusCode}')),
       );
     }
+  }
+
+  // ✅ New Function to Download Notes PDF
+  Future<void> _downloadNotesPdf() async {
+    if (_pdfFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No notes uploaded to generate PDF')),
+      );
+      return;
+    }
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          List<pw.Widget> content = [];
+
+          // ✅ Add Form Details at the Top
+          content.add(
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Exam Details', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 10),
+                pw.Text('Exam Name: ${_examNameController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Subject: ${_subjectNameController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Student Name: ${_studentNameController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Date: ${_dateController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Time: ${_timeController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Marks: ${_marksController.text}', style: pw.TextStyle(fontSize: 12)),
+                pw.Text('Difficulty: $_difficulty', style: pw.TextStyle(fontSize: 12)),
+                pw.SizedBox(height: 20),
+              ],
+            ),
+          );
+
+          // ✅ Add MCQs Section
+          content.add(
+            pw.Text('Generated MCQs:', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          );
+          content.add(pw.SizedBox(height: 10));
+
+          for (int i = 0; i < _mcqs.length; i++) {
+            var mcq = _mcqs[i];
+            String question = mcq['question'] ?? 'No Question';
+            Map<String, dynamic> options = mcq['options'] ?? {};
+            String correctAnswer = mcq['correct'] ?? 'No Answer';
+
+            content.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Q${i + 1}: $question', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 5),
+                  ...options.entries.map((option) => pw.Text(
+                    '${option.key}. ${option.value}',
+                    style: pw.TextStyle(fontSize: 12),
+                  )),
+                  pw.SizedBox(height: 5),
+                  //pw.Text('✅ Correct Answer: $correctAnswer', style: pw.TextStyle(fontSize: 12, color: PdfColors.green)),
+                  pw.SizedBox(height: 15),
+                ],
+              ),
+            );
+          }
+
+          return content;
+        },
+      ),
+    );
+    final output = await getApplicationDocumentsDirectory();
+    final filePath = '${output.path}/MCQ_paper_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    final file = File(filePath);
+    await file.writeAsBytes(await pdf.save());
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('MCQ saved at $filePath')),
+    );
   }
 
   @override
@@ -99,6 +196,7 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Form Fields
             TextFormField(
               controller: _examNameController,
               decoration: const InputDecoration(labelText: 'Exam Name', border: OutlineInputBorder()),
@@ -117,18 +215,38 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _dateController,
-              decoration: const InputDecoration(labelText: 'Date (DD/MM/YYYY)', border: OutlineInputBorder()),
+            // ✅ Date Picker Field with Icon
+            InkWell(
+              onTap: _pickDate,
+              child: IgnorePointer(
+                child: TextFormField(
+                  controller: _dateController,
+                  decoration: const InputDecoration(
+                    labelText: 'Date',
+                    border: OutlineInputBorder(),
+                    suffixIcon: Icon(Icons.calendar_today),  // 📅 Calendar icon
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _timeController,
-              decoration: const InputDecoration(labelText: 'Time (HH:MM)', border: OutlineInputBorder()),
+// ✅ Time Picker Field with Icon
+            InkWell(
+              onTap: _pickTime,
+              child: IgnorePointer(
+                child: TextFormField(
+                  controller: _timeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Time',
+                    border: OutlineInputBorder(),
+                    suffixIcon: Icon(Icons.access_time),  // ⏰ Clock icon
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(height: 12),
 
+            const SizedBox(height: 12),
             TextFormField(
               controller: _marksController,
               keyboardType: TextInputType.number,
@@ -145,7 +263,9 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
 
             DropdownButtonFormField<String>(
               value: _difficulty,
-              items: ['Easy', 'Moderate', 'Difficult'].map((level) => DropdownMenuItem(value: level, child: Text(level))).toList(),
+              items: ['Easy', 'Moderate', 'Difficult']
+                  .map((level) => DropdownMenuItem(value: level, child: Text(level)))
+                  .toList(),
               onChanged: (value) => setState(() => _difficulty = value!),
               decoration: const InputDecoration(labelText: 'Difficulty', border: OutlineInputBorder()),
             ),
@@ -159,119 +279,50 @@ class _McqGeneratorFormPageState extends State<McqGeneratorFormPage> {
             const SizedBox(height: 20),
 
             Center(
-              child: ElevatedButton(
-                onPressed: _submitForm,
-                child: const Text('Submit'),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: _submitForm,
+                    child: const Text('Submit'),
+                  ),
+                  const SizedBox(width: 16),  // Space between buttons
+                  ElevatedButton(
+                    onPressed: _downloadNotesPdf,  // ✅ Updated button function
+                    child: const Text('Download PDF'),
+                  ),
+                ],
               ),
             ),
+
+            if (_mcqs.isNotEmpty) const SizedBox(height: 20),
+            if (_mcqs.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Generated MCQs:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _mcqs.length,
+                    itemBuilder: (context, index) {
+                      var mcq = _mcqs[index];
+                      String question = mcq['question'] ?? 'No Question';
+                      Map<String, dynamic> options = mcq['options'] ?? {};
+                      String correctAnswer = mcq['correct'] ?? 'No Answer';
+
+                      return ListTile(
+                        title: Text('Q${index + 1}: $question'),
+                        //subtitle: Text('✅ Correct Answer: $correctAnswer'),
+                      );
+                    },
+                  ),
+                ],
+              ),
           ],
         ),
       ),
     );
   }
 }
-
-class McqDisplayPage extends StatelessWidget {
-  final Map<String, dynamic> jsonResponse;
-
-  const McqDisplayPage({super.key, required this.jsonResponse});
-
-  @override
-  Widget build(BuildContext context) {
-    List<dynamic> mcqs = jsonResponse['mcqs'] ?? [];
-    List<dynamic> answerKey = jsonResponse['answer_key'] ?? [];
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Generated MCQs')),
-      body: ListView.builder(
-        itemCount: mcqs.length,
-        itemBuilder: (context, index) {
-          var mcq = mcqs[index];
-          var answer = answerKey[index];
-
-          // MCQ details
-          String question = mcq['question'] ?? 'No Question';
-          String difficulty = mcq['difficulty'] ?? 'Unknown';
-          Map<String, dynamic> options = mcq['options'] ?? {};
-          String correctAnswer = answer['correct'] ?? 'No Answer';
-
-          return Card(
-            margin: const EdgeInsets.all(12),
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Display Question
-                  Text(
-                    'Q${index + 1}: $question',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Display Options
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: options.entries.map((entry) {
-                      String optionKey = entry.key;
-                      String optionValue = entry.value;
-
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          '$optionKey: $optionValue',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: optionValue == correctAnswer
-                                ? Colors.green
-                                : Colors.black,
-                            fontWeight: optionValue == correctAnswer
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Correct Answer
-                  Text(
-                    '✅ Correct Answer: $correctAnswer',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  // Difficulty Level
-                  Text(
-                    '🔥 Difficulty: $difficulty',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: difficulty == 'Easy'
-                          ? Colors.blue
-                          : difficulty == 'Medium'
-                          ? Colors.orange
-                          : Colors.red,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-

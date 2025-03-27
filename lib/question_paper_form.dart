@@ -46,6 +46,36 @@ class _QuestionPaperFormPageState extends State<QuestionPaperFormPage> {
     }
   }
 
+  // ✅ Show Date Picker
+  Future<void> _pickDate() async {
+    DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        _dateController.text = "${pickedDate.year}-${pickedDate.month}-${pickedDate.day}";
+      });
+    }
+  }
+
+  // ✅ Show Time Picker
+  Future<void> _pickTime() async {
+    TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+
+    if (pickedTime != null) {
+      setState(() {
+        _timeController.text = pickedTime.format(context);
+      });
+    }
+  }
+
   // ✅ Send Data to Flask Server
   Future<void> _sendDataToServer() async {
     if (_pdfPath == null) {
@@ -55,7 +85,7 @@ class _QuestionPaperFormPageState extends State<QuestionPaperFormPage> {
       return;
     }
 
-    final uri = Uri.parse('http://192.168.171.218:5000/generate-questions');  // Flask server URL
+    final uri = Uri.parse('http://192.168.171.216:5000/generate-questions');
     var request = http.MultipartRequest('POST', uri);
 
     request.files.add(
@@ -111,17 +141,19 @@ class _QuestionPaperFormPageState extends State<QuestionPaperFormPage> {
             pw.Text('Number of Questions: $_numQuestions'),
             pw.SizedBox(height: 20),
 
-            // Questions
+            // Questions with numbering
             pw.Text('Questions:', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
-            ..._questions.map((q) => pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text('Difficulty: ${q['difficulty']}',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text('Question: ${q['question']}'),
-                pw.SizedBox(height: 10),
-              ],
-            )),
+            ..._questions.asMap().entries.map((entry) {
+              final index = entry.key + 1;
+              final question = entry.value['question'];
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('$index. $question'),
+                  pw.SizedBox(height: 10),
+                ],
+              );
+            }),
           ],
         ),
       ),
@@ -145,79 +177,84 @@ class _QuestionPaperFormPageState extends State<QuestionPaperFormPage> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Form Fields
-              _buildTextField(_examNameController, 'Exam Name'),
-              _buildTextField(_subjectNameController, 'Subject Name'),
-              _buildTextField(_studentNameController, 'Student Name'),
-              _buildTextField(_dateController, 'Date (YYYY-MM-DD)'),
-              _buildTextField(_timeController, 'Time (HH:MM)'),
-              _buildTextField(_marksController, 'Marks', isNumber: true),
-
-              // PDF Upload
-              ElevatedButton(
-                onPressed: _pickPdf,
-                child: const Text('Upload PDF'),
-              ),
-              if (_pdfPath != null)
-                Text('Selected PDF: $_pdfPath', style: const TextStyle(fontSize: 14)),
-              const SizedBox(height: 12),
-
-              // Difficulty & Num Questions
-              const Text('Difficulty Level:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              DropdownButtonFormField<String>(
-                value: _difficulty,
-                items: ['Easy', 'Medium', 'Hard']
-                    .map((level) => DropdownMenuItem(value: level, child: Text(level)))
-                    .toList(),
-                onChanged: (value) => setState(() => _difficulty = value!),
-                decoration: const InputDecoration(border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 12),
-
-              _buildTextField(
-                TextEditingController(text: '$_numQuestions'),
-                'Number of Questions',
-                isNumber: true,
-                onChanged: (value) => _numQuestions = int.tryParse(value) ?? 1,
-              ),
-              const SizedBox(height: 20),
-
-              // Buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Form Fields
+                  _buildTextField(_examNameController, 'Exam Name'),
+                  _buildTextField(_subjectNameController, 'Subject Name'),
+                  _buildTextField(_studentNameController, 'Student Name'),
+
+                  // ✅ Date and Time Fields with Icons
+                  _buildDateTimeField(_dateController, 'Date (YYYY-MM-DD)', _pickDate, Icons.calendar_today),
+                  _buildDateTimeField(_timeController, 'Time (HH:MM)', _pickTime, Icons.access_time),
+
+                  _buildTextField(_marksController, 'Marks', isNumber: true),
+
+                  // PDF Upload
                   ElevatedButton(
-                    onPressed: _sendDataToServer,
-                    child: const Text('Submit'),
+                    onPressed: _pickPdf,
+                    child: const Text('Upload PDF'),
                   ),
-                  ElevatedButton(
-                    onPressed: _generatePdf,
-                    child: const Text('Download PDF'),
+                  if (_pdfPath != null)
+                    Text('Selected PDF: $_pdfPath', style: const TextStyle(fontSize: 14)),
+                  const SizedBox(height: 12),
+
+                  // Difficulty & Num Questions
+                  const Text('Difficulty Level:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  DropdownButtonFormField<String>(
+                    value: _difficulty,
+                    items: ['Easy', 'Medium', 'Hard']
+                        .map((level) => DropdownMenuItem(value: level, child: Text(level)))
+                        .toList(),
+                    onChanged: (value) => setState(() => _difficulty = value!),
+                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _buildTextField(
+                    TextEditingController(text: '$_numQuestions'),
+                    'Number of Questions',
+                    isNumber: true,
+                    onChanged: (value) => _numQuestions = int.tryParse(value) ?? 1,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _sendDataToServer,
+                        child: const Text('Submit'),
+                      ),
+                      ElevatedButton(
+                        onPressed: _generatePdf,
+                        child: const Text('Download PDF'),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+            ),
 
-              // Display Questions
-              if (_questions.isNotEmpty) ...[
-                const Text('Generated Questions:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _questions.length,
-                  itemBuilder: (context, index) => ListTile(
-                    title: Text('Difficulty: ${_questions[index]['difficulty']}'),
-                    subtitle: Text('Question: ${_questions[index]['question']}'),
-                  ),
-                ),
-              ],
-            ],
-          ),
+            const SizedBox(height: 20),
+
+            // ✅ Display Generated Questions
+            if (_questions.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Generated Questions:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ..._questions.map((q) => Text("- ${q['question']}")).toList(),
+                ],
+              ),
+          ],
         ),
       ),
     );
@@ -225,15 +262,20 @@ class _QuestionPaperFormPageState extends State<QuestionPaperFormPage> {
 
   Widget _buildTextField(TextEditingController controller, String label,
       {bool isNumber = false, Function(String)? onChanged}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-        onChanged: onChanged,
-        validator: (value) => value!.isEmpty ? 'Please enter $label' : null,
-      ),
+    return TextFormField(
+      controller: controller,
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      decoration: InputDecoration(labelText: label, border: OutlineInputBorder()),
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _buildDateTimeField(TextEditingController controller, String label, VoidCallback onTap, IconData icon) {
+    return TextFormField(
+      controller: controller,
+      readOnly: true,
+      decoration: InputDecoration(labelText: label, suffixIcon: Icon(icon), border: OutlineInputBorder()),
+      onTap: onTap,
     );
   }
 }
